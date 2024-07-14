@@ -5,39 +5,49 @@ const client_id = "0f3605d1-2218-485f-aa82-678f14087e2c";
 const client_secret = "KDM8Q~GpPQiOQr1OuGhf4jtNnMrmskm-7S5Lpcpu"; // Secret value, not the secret ID
 const scope = "https://graph.microsoft.com/.default";
 
-/*const siteHostname = "ceadll.sharepoint.com"; // Replace with your SharePoint hostname
-const sitePath = "/sites/home"; // Replace with your SharePoint site path
-const filePath =
-  "/SiteAssets/SitePages/Home/CEAD-Employee-Handbook---Canada--January-2023-.pdf?web=1"; // Replace with your file path
-*/
-//url = https://ceadll-my.sharepoint.com/shared?listurl=https%3A%2F%2Fceadll%2Esharepoint%2Ecom%2Fsites%2FAPIS%2DDevelopment%2FShared%20Documents&viewid=459b74b4%2D0483%2D4eed%2D8af1%2Df0bb944da74c&id=%2Fsites%2FAPIS%2DDevelopment%2FShared%20Documents%2FApis%20Modules%2FImages%2Fapis%2Esvg&parent=%2Fsites%2FAPIS%2DDevelopment%2FShared%20Documents%2FApis%20Modules%2FImages
-//url = https://ceadll.sharepoint.com/sites/APIS-Development/Shared%20Documents/Forms/AllItems.aspx?id=%2Fsites%2FAPIS%2DDevelopment%2FShared%20Documents%2FKnowledge%20Share%2FTraining&viewid=459b74b4%2D0483%2D4eed%2D8af1%2Df0bb944da74c
+const sharepointUrl = "https://ceadll.sharepoint.com/sites/APIS-Development/Shared Documents/Knowledge Share/Training/READ ME.txt";
+//ceadll.sharepoint.com/sites/APIS-Development/Shared Documents/Knowledge Share/Training/READ ME.txt
 const siteHostname = "ceadll.sharepoint.com"
 const sitePath = "/sites/APIS-Development"
-//const filePath = "/Teams Wiki Data/General/test_sharepoint.docx";
-const filePath = "/Shared Documents/Knowledge Share/Training/READ ME.txt";
+const libraryName = "Documents"
+const filePath = "Knowledge Share/Training/READ ME.txt";
 
 async function getAccessToken() {
-  const token_url = `https://login.microsoftonline.com/${tenant_id}/oauth2/v2.0/token`;
+    const token_url = `https://login.microsoftonline.com/${tenant_id}/oauth2/v2.0/token`;
 
-  const payload = new URLSearchParams({
-    grant_type: "client_credentials",
-    client_id: client_id,
-    client_secret: client_secret,
-    scope: scope,
-  });
+    const payload = new URLSearchParams({
+      grant_type: "client_credentials",
+      client_id: client_id,
+      client_secret: client_secret,
+      scope: scope,
+    });
 
-  try {
-    const response = await axios.post(token_url, payload);
-    console.log("Access Token:", response.data.access_token); // Log the token
-    return response.data.access_token;
-  } catch (error) {
-    console.error("Error fetching access token:", error);
-    throw error;
-  }
+    try {
+      const response = await axios.post(token_url, payload);
+      console.log("Access Token:", response.data.access_token); // Log the token
+      return response.data.access_token;
+    } catch (error) {
+      console.error("Error fetching access token:", error);
+      throw error;
+    }
+  };
+
+
+function extractUrlParts(sharepointUrl) {
+  const url = new URL(sharepointUrl);
+  const siteHostname = url.hostname;
+  const pathParts = url.pathname.split("/");
+  const sitePath = `/sites/${pathParts[2]}`;
+  const libraryName = pathParts[3]; // This will be 'Shared Documents' or equivalent
+  const filePath = url.pathname.split("/").slice(4).join("/");
+  console.log(libraryName)
+  return { siteHostname, sitePath, libraryName, filePath };
 }
 
-async function getSiteId(accessToken) {
+
+//extractUrlParts("https://ceadll.sharepoint.com/sites/APIS-Development/Shared Documents/Knowledge Share/Training/READ ME.txt");
+
+async function getSiteId(accessToken,siteHostname,sitePath) {
   try {
     const response = await axios.get(
       `https://graph.microsoft.com/v1.0/sites/${siteHostname}:${sitePath}`,
@@ -85,7 +95,7 @@ async function testGetSiteId() {
 //testGetSiteId();
 
 
-async function getDriveId(accessToken, siteId) {
+async function getDriveId(accessToken, siteId, libraryName) {
   try {
     const response = await axios.get(
       `https://graph.microsoft.com/v1.0/sites/${siteId}/drives`,
@@ -95,19 +105,32 @@ async function getDriveId(accessToken, siteId) {
         },
       }
     );
-    console.log("Drive ID:", response.data.value[1].id);
+
+    const drives = response.data.value;
+    console.log(drives)
+    console.log(libraryName)
+    //const drive = drives.find((d) => d.name === libraryName);
+    const drive = drives.find((drive) => {
+      const driveUrlParts = drive.webUrl.split("/");
+      const driveLibraryName = driveUrlParts[driveUrlParts.length - 1];
+      return driveLibraryName === libraryName;
+    });
+    if (!drive) {
+      throw new Error(`Drive not found for library name: ${libraryName}`);
+    }
+    return drive.id;
     console.log("Drive ID:", response.data.value);
-    return response.data.value[1].id;
+    //return response.data.value[1].id;
   } catch (error) {
     console.error("Error fetching drive ID:", error);
     throw error;
   }
 }
 
-async function getItemId(accessToken, driveId) {
+async function getItemId(accessToken, driveId,filePath) {
   try {
     const response = await axios.get(
-      `https://graph.microsoft.com/v1.0/drives/${driveId}/root:${filePath}`,
+      `https://graph.microsoft.com/v1.0/drives/${driveId}/root:/${filePath}`,
       {
         headers: {
           Authorization: `Bearer ${accessToken}`,
@@ -121,8 +144,7 @@ async function getItemId(accessToken, driveId) {
     throw error;
   }
 }
-
-async function retrieveDocument() {
+async function retrieveDocument1() {
   const accessToken = await getAccessToken();
   if (!accessToken) {
     console.error("Failed to obtain access token");
@@ -131,8 +153,10 @@ async function retrieveDocument() {
 
   const siteId = await getSiteId(accessToken);
   const driveId = await getDriveId(accessToken, siteId);
-  //const itemId = await getItemId(accessToken, driveId);
-  const itemId = "01EMSVNK5TUMLIWKZV6VHLZUUATHWNOBKJ"
+  const itemId = await getItemId(accessToken, driveId);
+  console.log(itemId)
+  //const itemId = "01EMSVNK5TUMLIWKZV6VHLZUUATHWNOBKJ";
+  //console.log(itemId);
   const url = `https://graph.microsoft.com/v1.0/sites/${siteId}/drives/${driveId}/items/${itemId}`;
 
   try {
@@ -147,16 +171,47 @@ async function retrieveDocument() {
   }
 }
 
-async function retrieveDocumentContent() {
+
+async function retrieveDocument(sharepointUrl) {
   const accessToken = await getAccessToken();
   if (!accessToken) {
     console.error("Failed to obtain access token");
     return;
   }
+  const { siteHostname, sitePath, libraryName, filePath } = extractUrlParts(sharepointUrl)
+  console.log(siteHostname);
+  console.log(sitePath);
+  console.log(libraryName);
+  console.log(filePath);
+  const siteId = await getSiteId(accessToken,siteHostname,sitePath);
+  const driveId = await getDriveId(accessToken, siteId, libraryName);
+  const itemId = await getItemId(accessToken, driveId,filePath);
+  //const itemId = "01EMSVNK5TUMLIWKZV6VHLZUUATHWNOBKJ";
+  const url = `https://graph.microsoft.com/v1.0/sites/${siteId}/drives/${driveId}/items/${itemId}`;
 
-  const siteId = await getSiteId(accessToken);
-  const driveId = await getDriveId(accessToken, siteId);
-  const itemId = "01EMSVNK5TUMLIWKZV6VHLZUUATHWNOBKJ";
+  try {
+    const response = await axios.get(url, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    });
+    console.log("Document:", response.data);
+  } catch (error) {
+    console.error("Error retrieving document:", error);
+  }
+}
+
+async function retrieveDocumentContent(sharepointUrl) {
+  const accessToken = await getAccessToken();
+  if (!accessToken) {
+    console.error("Failed to obtain access token");
+    return;
+  }
+  const { siteHostname, sitePath, libraryName, filePath } =
+    extractUrlParts(sharepointUrl);
+  const siteId = await getSiteId(accessToken, siteHostname, sitePath);
+  const driveId = await getDriveId(accessToken, siteId, libraryName);
+  const itemId = await getItemId(accessToken, driveId, filePath); //const itemId = "01EMSVNK5TUMLIWKZV6VHLZUUATHWNOBKJ";
   const url = `https://graph.microsoft.com/v1.0/sites/${siteId}/drives/${driveId}/items/${itemId}/content`;
 
   try {
@@ -179,7 +234,7 @@ async function retrieveDocumentContent() {
 }
 
 // Run the function
-retrieveDocumentContent();
+//retrieveDocumentContent();
 
 
 
@@ -213,8 +268,9 @@ async function checkDriveId() {
 
 async function listRootItems() {
   const accessToken = await getAccessToken();
-  const siteId = await getSiteId(accessToken);
-  const driveId = await getDriveId(accessToken, siteId);
+
+  const siteId = await getSiteId(accessToken,siteHostname,sitePath);
+  const driveId = await getDriveId(accessToken, siteId,libraryName);
   const url = `https://graph.microsoft.com/v1.0/drives/${driveId}/root/children`;
   
 
@@ -271,3 +327,5 @@ async function listFolderItems() {
 //listRootItems();
 //listFolderItems();
 //checkDriveId();
+//retrieveDocument1();
+retrieveDocumentContent(sharepointUrl);
